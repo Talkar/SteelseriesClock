@@ -1,9 +1,11 @@
 ﻿using System;
-using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Timers;
 using Newtonsoft.Json;
+using System.Runtime.InteropServices;
+using System.Diagnostics;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace Time_Steelseries
 {
@@ -19,60 +21,80 @@ namespace Time_Steelseries
     }
     class Program
     {
+        [DllImport("kernel32.dll")]
+        static extern IntPtr GetConsoleWindow();
+
+        [DllImport("user32.dll")]
+        static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
         static HttpWebRequest gameEventRequest;
-        static CultureInfo timeCulture;
-        static Timer timer = new Timer(5000);
+        static Timer timer = new Timer(TimeSpan.FromSeconds(1).TotalMilliseconds);
         static int numberOfLoops = 1;
         static string coreProps; // The coreProps file with the ip and port information in string format
         static string ipAddress;
         static bool timerInitialized = false;
-
+        static bool hideOutput = false;
         static public void Main(string[] args)
         {
             coreProps = File.ReadAllText("C:/ProgramData/SteelSeries/SteelSeries Engine 3/coreProps.json");
             CoreProps corePropsDeserialized = JsonConvert.DeserializeObject<CoreProps>(coreProps);
             ipAddress = "http://" + corePropsDeserialized.address;
+            var parsedArg = -1;
+            foreach (var arg in args)
+            {
 
-            Menu();
+                int.TryParse(arg, out parsedArg);
+                if (arg == "/q")
+                {
+                    IntPtr handle = Process.GetCurrentProcess().MainWindowHandle;
+                    // Hide
+                    ShowWindow(handle, 0);
+                    hideOutput = true;
+
+                }
+            }
+
+            Menu(parsedArg);
         }
 
-        static void Menu()
+        static void Menu(int argumentMenuItem = -1)
         {
             int response;
-
-            while (true)
+            if (argumentMenuItem >= 0)
             {
-                Console.Clear();
-                Console.WriteLine("What would you like to do?\n" +
-                "0 - Start Sending Clock Updates to engine\n" +
-                "1 - Install Engine App\n" +
-                "2 - Uninstall Engine App");
-                bool success = Int32.TryParse(Console.ReadLine(), out response);
-                if (success)
+                response = argumentMenuItem;
+            }
+            else
+            {
+                while (true)
                 {
-                    break;
-                }
-                else
-                {
-                    Console.WriteLine("The inputed value is not an integer, try again");
+                    WriteLine("What would you like to do?\n" +
+                    "0 - Start Sending Clock Updates to engine\n" +
+                    "1 - Install Engine App\n" +
+                    "2 - Uninstall Engine App", false);
+                    bool success = Int32.TryParse(Console.ReadLine(), out response);
+                    if (success)
+                    {
+                        break;
+                    }
+                    else
+                    {
+                        WriteLine("The inputed value is not an integer, try again");
+                    }
                 }
             }
             switch (response)
             {
                 case 0:
-                    Console.WriteLine("Starting UpdateClock Loop... Press any key to end the loop");
+                    WriteLine("Starting UpdateClock Loop... Press any key to end the loop");
                     StartUpdateClockLoop();
                     break;
                 case 1:
                     RegisterMetadata();
-                    Console.WriteLine("Press any key to return to the menu");
-                    Console.ReadKey(true);
                     Menu();
                     break;
                 case 2:
                     RemoveGame();
-                    Console.WriteLine("Press any key to return to the menu");
-                    Console.ReadKey(true);
                     Menu();
                     break;
                 default:
@@ -81,12 +103,22 @@ namespace Time_Steelseries
             }
         }
 
+        static void WriteLine(string line, bool doClear = false)
+        {
+            if (hideOutput)
+                return;
+
+            if (doClear)
+                Console.Clear();
+
+            Console.WriteLine(line);
+        }
+
         static void StartUpdateClockLoop()
         {
-            if(!timerInitialized)
+            if (!timerInitialized)
             {
                 timerInitialized = true;
-                timeCulture = CultureInfo.CreateSpecificCulture("es-ES");
 
                 timer.Elapsed += UpdateClock;
                 timer.AutoReset = true;
@@ -107,25 +139,25 @@ namespace Time_Steelseries
                 gameEventRequest.ContentType = "application/json";
                 gameEventRequest.Method = "POST";
 
-                Console.WriteLine($"Running UpdateClock for the {numberOfLoops} time");
+                WriteLine($"Running UpdateClock for the {numberOfLoops} time");
                 numberOfLoops++;
                 using (StreamWriter streamWriter = new StreamWriter(gameEventRequest.GetRequestStream()))
                 {
                     string json = "{\"game\": \"CLOCK\"," +
                                   "\"event\": \"TIME\"," +
                                   "\"data\": { \"value\": 1, " +
-                                  "\"frame\": {\"textvalue\": \"" + DateTime.Now.ToString("t", timeCulture) + "\"} } }";
+                                  "\"frame\": {\"textvalue\": \"" + DateTime.Now.ToString("dd/MM/yy HH:mm") + "\"} } }";
 
                     streamWriter.Write(json);
                 }
                 HttpWebResponse gameEventResponse = (HttpWebResponse)gameEventRequest.GetResponse();
-                Console.WriteLine($"Response: {gameEventResponse.StatusCode}");
+                WriteLine($"Response: {gameEventResponse.StatusCode}");
                 gameEventRequest.Abort();
                 gameEventResponse.Close();
             }
             catch (Exception exception)
             {
-                Console.WriteLine(exception.Message);
+                WriteLine(exception.Message);
             }
         }
 
@@ -136,7 +168,7 @@ namespace Time_Steelseries
                 HttpWebRequest bindRequest = (HttpWebRequest)WebRequest.Create($"{ipAddress}/bind_game_event");
                 bindRequest.ContentType = "application/json";
                 bindRequest.Method = "POST";
-                
+
                 using (StreamWriter streamWriter = new StreamWriter(bindRequest.GetRequestStream()))
                 {
                     string json = "{\"game\": \"CLOCK\", " +
@@ -158,12 +190,12 @@ namespace Time_Steelseries
                     streamWriter.Write(json);
                 }
                 HttpWebResponse bindResponse = (HttpWebResponse)bindRequest.GetResponse();
-                Console.WriteLine($"Response: {bindResponse.StatusCode}");
-                Console.WriteLine("The event is bound");
+                WriteLine($"Response: {bindResponse.StatusCode}");
+                WriteLine("The event is bound");
             }
             catch (Exception exception)
             {
-                Console.WriteLine(exception.Message);
+                WriteLine(exception.Message);
             }
         }
 
@@ -178,18 +210,18 @@ namespace Time_Steelseries
                 using (StreamWriter streamWriter = new StreamWriter(registerRequest.GetRequestStream()))
                 {
                     string json = "{\"game\": \"CLOCK\", " +
-                        "\"game_display_name\": \"Clock\", " + 
-                        "\"developer\": \"TechnOllieG\"}";
+                        "\"game_display_name\": \"Clock\", " +
+                        "\"developer\": \"TechnOllieG & minor modifications by Talkar\"}";
 
                     streamWriter.Write(json);
                 }
                 HttpWebResponse registerResponse = (HttpWebResponse)registerRequest.GetResponse();
-                Console.WriteLine($"Response: {registerResponse.StatusCode}");
-                Console.WriteLine("The metadata has been registered");
+                WriteLine($"Response: {registerResponse.StatusCode}");
+                WriteLine("The metadata has been registered");
             }
             catch (Exception exception)
             {
-                Console.WriteLine(exception.Message);
+                WriteLine(exception.Message);
             }
             BindEvent();
         }
@@ -209,12 +241,12 @@ namespace Time_Steelseries
                     streamWriter.Write(json);
                 }
                 HttpWebResponse removalResponse = (HttpWebResponse)removalRequest.GetResponse();
-                Console.WriteLine($"Response: {removalResponse.StatusCode}");
-                Console.WriteLine("The app has been uninstalled");
+                WriteLine($"Response: {removalResponse.StatusCode}");
+                WriteLine("The app has been uninstalled");
             }
             catch (Exception exception)
             {
-                Console.WriteLine(exception.Message);
+                WriteLine(exception.Message);
             }
         }
     }
